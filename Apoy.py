@@ -108,108 +108,132 @@ with tab2:
                     results = []
                     soup = None
                     
-                    # Pentru Sazka.cz - folosim API-ul lor direct
-                    if 'sazka.cz' in source['url'] and use_api:
-                        try:
-                            st.info("🎯 Încerc să extrag direct din API Sazka...")
-                            
-                            # Sazka folosește un API pentru a încărca datele
-                            api_url = "https://www.sazka.cz/api/v1/lottery-draws"
-                            
-                            headers = {
-                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                                'Accept': 'application/json',
-                                'Referer': source['url']
-                            }
-                            
-                            # Determină ID-ul loteriei din URL
-                            lottery_id = None
-                            if 'rychle-kacky' in source['url']:
-                                lottery_id = 'rychle-kacky'
-                            elif 'keno' in source['url']:
-                                lottery_id = 'keno'
-                            
-                            if lottery_id:
-                                # Încearcă să obții datele prin API
-                                params = {
-                                    'lottery': lottery_id,
-                                    'limit': min(num_rounds, 1000),
-                                    'offset': 0
-                                }
-                                
-                                response = requests.get(api_url, headers=headers, params=params, timeout=15)
-                                
-                                if response.status_code == 200:
-                                    data = response.json()
-                                    st.success(f"✅ Am găsit API-ul! Procesez datele...")
-                                    
-                                    # Procesează datele JSON
-                                    if 'draws' in data:
-                                        for draw in data['draws'][:num_rounds]:
-                                            row = []
-                                            # Extrage ID
-                                            if 'drawId' in draw:
-                                                row.append(str(draw['drawId']))
-                                            # Extrage data
-                                            if 'drawTime' in draw:
-                                                row.append(draw['drawTime'])
-                                            # Extrage numerele
-                                            if 'numbers' in draw:
-                                                numbers = ', '.join(map(str, draw['numbers']))
-                                                row.append(numbers)
-                                            
-                                            if row:
-                                                results.append(row)
-                                else:
-                                    st.warning(f"API status: {response.status_code}, încerc metoda standard...")
-                        
-                        except Exception as e:
-                            st.warning(f"Nu am putut folosi API-ul: {str(e)}")
-                            st.info("📝 Încerc metoda standard...")
+                    # Încarcă pagina
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Accept-Language': 'cs,en;q=0.9',
+                        'Referer': 'https://www.sazka.cz/'
+                    }
                     
-                    # Dacă nu am rezultate din API, folosește scraping HTML
-                    if not results:
-                        headers = {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                            'Accept-Language': 'cs,en;q=0.9',
-                            'Referer': 'https://www.sazka.cz/'
-                        }
-                        
-                        response = requests.get(source['url'], headers=headers, timeout=15)
-                        response.raise_for_status()
-                        soup = BeautifulSoup(response.content, 'html.parser')
-    
-                    # Extrage datele din HTML (dacă nu am rezultate din API)
-                    if not results and soup:
-                        # Metodă generică - caută tabele și liste
+                    response = requests.get(source['url'], headers=headers, timeout=15)
+                    response.raise_for_status()
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    
+                    st.info("📄 Am încărcat pagina, analizez structura...")
+                    
+                    # Pentru Sazka.cz - căutăm structura specifică
+                    if 'sazka.cz' in source['url']:
+                        # Caută toate elementele care ar putea conține rezultate
+                        # Varianta 1: Tabele
                         tables = soup.find_all('table')
+                        if tables:
+                            st.info(f"✓ Am găsit {len(tables)} tabel(e)")
+                            for table_idx, table in enumerate(tables):
+                                rows = table.find_all('tr')
+                                if len(rows) > 5:  # Pare să fie un tabel cu date
+                                    st.info(f"Procesez tabelul {table_idx + 1} cu {len(rows)} rânduri...")
+                                    for row in rows[1:min(len(rows), num_rounds+1)]:
+                                        cells = row.find_all(['td', 'th'])
+                                        if len(cells) >= 2:
+                                            row_data = [cell.get_text(strip=True) for cell in cells]
+                                            if any(row_data):  # Nu e rând gol
+                                                results.append(row_data)
+                                    if results:
+                                        break
                         
+                        # Varianta 2: Div-uri cu clase specifice Sazka
+                        if not results:
+                            st.info("Caut div-uri cu rezultate...")
+                            result_divs = soup.find_all(['div', 'article', 'section'], 
+                                                       class_=re.compile(r'result|draw|vysledek|tah|game', re.IGNORECASE))
+                            
+                            if result_divs:
+                                st.info(f"✓ Am găsit {len(result_divs)} elemente posibile")
+                                
+                                for div in result_divs[:num_rounds]:
+                                    # Extrage text și numere
+                                    text = div.get_text(separator=' ', strip=True)
+                                    
+                                    # Caută ID/număr extragere
+                                    draw_id = re.search(r'(\d{7,})', text)
+                                    
+                                    # Caută dată
+                                    date_match = re.search(r'(\d{1,2})[.\s]+(\d{1,2})[.\s]+(\d{4})', text)
+                                    
+                                    # Caută oră
+                                    time_match = re.search(r'(\d{1,2}):(\d{2})', text)
+                                    
+                                    # Caută numerele extrase (grupuri de numere separate prin virgulă sau spațiu)
+                                    numbers = re.findall(r'\b(\d{1,2})\b', text)
+                                    
+                                    # Filtrează numerele realiste pentru loterie (1-80 pentru Keno)
+                                    valid_numbers = [n for n in numbers if 1 <= int(n) <= 80]
+                                    
+                                    # Dacă avem suficiente numere, e probabil un rezultat valid
+                                    if len(valid_numbers) >= 10:
+                                        row = []
+                                        if draw_id:
+                                            row.append(draw_id.group(1))
+                                        if date_match:
+                                            row.append(f"{date_match.group(1)}.{date_match.group(2)}.{date_match.group(3)}")
+                                        if time_match:
+                                            row.append(f"{time_match.group(1)}:{time_match.group(2)}")
+                                        
+                                        # Adaugă numerele (primele 20 pentru Keno)
+                                        row.append(', '.join(valid_numbers[:20]))
+                                        
+                                        if len(row) >= 2:
+                                            results.append(row)
+                        
+                        # Varianta 3: Caută în scripturile JSON embedate
+                        if not results and use_api:
+                            st.info("Caut date JSON în pagină...")
+                            scripts = soup.find_all('script', type='application/json')
+                            scripts += soup.find_all('script', string=re.compile(r'draws|results|vysledky'))
+                            
+                            for script in scripts:
+                                script_text = script.string if script.string else str(script)
+                                
+                                # Încearcă să găsească JSON
+                                try:
+                                    # Caută pattern-uri JSON
+                                    json_matches = re.findall(r'\{[^{}]*"draws?"[^{}]*\}', script_text)
+                                    for json_str in json_matches:
+                                        try:
+                                            data = json.loads(json_str)
+                                            if 'draws' in data or 'draw' in data:
+                                                st.success("✓ Am găsit date JSON!")
+                                                # Procesează JSON-ul găsit
+                                                draws = data.get('draws', [data.get('draw', [])])
+                                                for draw in draws[:num_rounds]:
+                                                    row = []
+                                                    if isinstance(draw, dict):
+                                                        row.append(str(draw.get('id', draw.get('drawId', ''))))
+                                                        row.append(str(draw.get('date', draw.get('drawTime', ''))))
+                                                        nums = draw.get('numbers', draw.get('winning_numbers', []))
+                                                        if nums:
+                                                            row.append(', '.join(map(str, nums)))
+                                                        if row and len(row) >= 2:
+                                                            results.append(row)
+                                        except:
+                                            continue
+                                except:
+                                    continue
+                    
+                    # Metodă generică pentru alte site-uri
+                    else:
+    
+                                        # Metodă generică pentru alte site-uri
+                    else:
+                        tables = soup.find_all('table')
                         if tables:
                             st.info(f"Am găsit {len(tables)} tabel(e) pe pagină")
-                            
-                            # Procesează primul tabel
-                            for row in tables[0].find_all('tr')[1:num_rounds+1]:  # Skip header
+                            for row in tables[0].find_all('tr')[1:num_rounds+1]:
                                 cells = row.find_all(['td', 'th'])
                                 if len(cells) >= 2:
                                     row_data = [cell.get_text(strip=True) for cell in cells]
                                     results.append(row_data)
-                        
-                        # Dacă nu găsim tabele, căutăm alte structuri
-                        if not results:
-                            # Caută div-uri sau span-uri cu clase comune
-                            divs = soup.find_all('div', class_=re.compile(r'result|draw|number|winning|vysledk'))
-                            if divs:
-                                st.info(f"Am găsit {len(divs)} elemente cu rezultate")
-                                
-                                # Încearcă să extragă din div-uri
-                                for div in divs[:num_rounds]:
-                                    text = div.get_text(strip=True)
-                                    if text:
-                                        # Încearcă să găsească pattern-uri de numere
-                                        numbers = re.findall(r'\d+', text)
-                                        if len(numbers) >= 5:  # Are sens ca rezultat de loterie
-                                            results.append([text])
                     
                     if results:
                         # Crează DataFrame
