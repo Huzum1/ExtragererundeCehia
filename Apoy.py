@@ -5,6 +5,7 @@ import pandas as pd
 import json
 from datetime import datetime
 import re
+import time
 
 st.set_page_config(page_title="Lottery Data Extractor", page_icon="🎰", layout="wide")
 
@@ -55,12 +56,6 @@ with tab1:
     
     numbers_range = st.text_input("Interval numere", placeholder="ex: 1-80 sau 1-66", value="1-80")
     
-    # Informații despre selectori CSS/HTML
-    with st.expander("⚙️ Setări Avansate (Opțional)"):
-        st.markdown("Ajută aplicația să găsească datele pe pagină:")
-        css_selector = st.text_input("Selector CSS pentru tabel/rezultate", placeholder="ex: .results-table, #draws")
-        date_format = st.text_input("Format dată", placeholder="ex: DD.MM.YYYY sau YYYY-MM-DD", value="DD.MM.YYYY")
-    
     if st.button("💾 Salvează Sursa", type="primary"):
         if source_name and source_url:
             new_source = {
@@ -68,9 +63,7 @@ with tab1:
                 'url': source_url,
                 'type': source_type,
                 'numbers_count': numbers_count,
-                'numbers_range': numbers_range,
-                'css_selector': css_selector if css_selector else None,
-                'date_format': date_format
+                'numbers_range': numbers_range
             }
             st.session_state.saved_sources.append(new_source)
             st.success(f"✅ Sursa '{source_name}' a fost salvată!")
@@ -102,50 +95,131 @@ with tab2:
         if st.button("🔍 Extrage Date", type="primary"):
             with st.spinner(f"Extrag {num_rounds} runde de la {source['name']}..."):
                 try:
-                    # Headers pentru a evita blocarea
-                    headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    }
-                    
-                    response = requests.get(source['url'], headers=headers, timeout=10)
-                    response.raise_for_status()
-                    
-                    soup = BeautifulSoup(response.content, 'html.parser')
-                    
-                    # Încearcă să găsească datele
                     results = []
                     
-                    # Metodă generică - caută tabele și liste
-                    tables = soup.find_all('table')
-                    
-                    if tables:
-                        st.info(f"Am găsit {len(tables)} tabel(e) pe pagină")
+                    # Pentru Sazka.cz Rychlé kačky - folosește ÎNTOTDEAUNA API
+                    if 'sazka.cz' in source['url'] and 'rychle-kacky' in source['url']:
+                        st.info("🎯 Detectat Sazka Rychlé kačky - folosesc API Gateway...")
                         
-                        # Procesează primul tabel
-                        for row in tables[0].find_all('tr')[1:num_rounds+1]:  # Skip header
-                            cells = row.find_all(['td', 'th'])
-                            if len(cells) >= 2:
-                                row_data = [cell.get_text(strip=True) for cell in cells]
-                                results.append(row_data)
+                        api_base = "https://apigw.sazka.cz/lottery/v2/cs/online-lotteries/rychle-kacky/draws"
+                        
+                        headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Accept': 'application/json',
+                            'Ocp-Apim-Subscription-Key': '6fdc6e24bfcb438bac06efb0f1488534',
+                            'Referer': source['url'],
+                            'Origin': 'https://www.sazka.cz'
+                        }
+                        
+                        rounds_per_request = 20
+                        num_requests = (num_rounds // rounds_per_request) + 1
+                        
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        for page in range(num_requests):
+                            if len(results) >= num_rounds:
+                                break
+                                
+                            status_text.text(f"📥 Extrag pagina {page + 1}/{num_requests}...")
+                            
+                            params = {
+                                'limit': rounds_per_request,
+                                'offset': page * rounds_per_request
+                            }
+                            
+                            try:
+                                response = requests.get(api_base, headers=headers, params=params, timeout=10)
+                                
+                                if response.status_code == 200:
+                                    data = response.json()
+                                    
+                                    draws = data if isinstance(data, list) else data.get('draws', [])
+                                    
+                                    for draw in draws:
+                                        if len(results) >= num_rounds:
+                                            break
+                                        
+                                        row = []
+                                        
+                                        draw_id = draw.get('id') or draw.get('drawId')
+                                        if draw_id:
+                                            row.append(str(draw_id))
+                                        
+                                        draw_time = draw.get('drawTime') or draw.get('time')
+                                        if draw_time:
+                                            try:
+                                                if 'T' in str(draw_time):
+                                                    dt = datetime.fromisoformat(str(draw_time).replace('Z', '+00:00'))
+                                                    row.append(dt.strftime('%d.%m.%Y'))
+                                                    row.append(dt.strftime('%H:%M'))
+                                                else:
+                                                    row.append(str(draw_time))
+                                            except:
+                                                row.append(str(draw_time))
+                                        
+                                        numbers = draw.get('numbers', [])
+                                        if numbers:
+                                            row.append(', '.join(map(str, numbers)))
+                                        
+                                        if len(row) >= 2:
+                                            results.append(row)
+                                    
+                                else:
+                                    st.warning(f"⚠️ API returnat status {response.status_code}")
+                                    break
+                            
+                            except Exception as e:
+                                st.warning(f"⚠️ Eroare: {str(e)}")
+                                break
+                            
+                            progress_bar.progress(min((page + 1) / num_requests, 1.0))
+                            
+                            if page < num_requests - 1:
+                                time.sleep(0.3)
+                        
+                        progress_bar.empty()
+                        status_text.empty()
+                        
+                        if results:
+                            st.success(f"✅ Am extras {len(results)} runde din API!")
                     
-                    # Dacă nu găsim tabele, căutăm alte structuri
+                    # Scraping HTML generic
                     if not results:
-                        # Caută div-uri sau span-uri cu clase comune
-                        divs = soup.find_all('div', class_=re.compile(r'result|draw|number|winning'))
-                        if divs:
-                            st.info(f"Am găsit {len(divs)} elemente cu rezultate")
+                        st.info("📄 Încerc scraping HTML...")
+                        
+                        headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        }
+                        
+                        response = requests.get(source['url'], headers=headers, timeout=15)
+                        response.raise_for_status()
+                        soup = BeautifulSoup(response.content, 'html.parser')
+                        
+                        # Caută tabele
+                        tables = soup.find_all('table')
+                        if tables:
+                            st.info(f"✓ Am găsit {len(tables)} tabel(e)")
+                            for table in tables:
+                                rows = table.find_all('tr')
+                                for row in rows[1:num_rounds+1]:
+                                    cells = row.find_all(['td', 'th'])
+                                    if len(cells) >= 2:
+                                        row_data = [cell.get_text(strip=True) for cell in cells]
+                                        if any(row_data):
+                                            results.append(row_data)
+                                if results:
+                                    break
                     
+                    # Afișează rezultatele
                     if results:
-                        # Crează DataFrame
                         df = pd.DataFrame(results)
                         st.session_state.extracted_data = df
                         
                         st.success(f"✅ Am extras {len(results)} runde!")
-                        
                         st.dataframe(df, use_container_width=True)
                         
-                        # Download buttons
-                        col1, col2, col3 = st.columns(3)
+                        col1, col2 = st.columns(2)
                         
                         with col1:
                             csv = df.to_csv(index=False)
@@ -157,11 +231,6 @@ with tab2:
                             )
                         
                         with col2:
-                            excel_buffer = pd.ExcelWriter('temp.xlsx', engine='openpyxl')
-                            df.to_excel(excel_buffer, index=False)
-                            excel_buffer.close()
-                            
-                        with col3:
                             json_str = df.to_json(orient='records', indent=2)
                             st.download_button(
                                 "📥 Download JSON",
@@ -170,15 +239,9 @@ with tab2:
                                 "application/json"
                             )
                     else:
-                        st.error("Nu am putut extrage date. Structura paginii ar putea fi diferită.")
-                        st.info("💡 Sfat: Verifică URL-ul sau încearcă să adaugi un selector CSS în setările avansate")
-                        
-                        # Arată preview HTML pentru debugging
-                        with st.expander("🔍 Vezi structura HTML (pentru debugging)"):
-                            st.code(soup.prettify()[:5000], language='html')
+                        st.error("❌ Nu am putut extrage date.")
+                        st.info("💡 Verifică URL-ul sau structura paginii")
                 
-                except requests.exceptions.RequestException as e:
-                    st.error(f"Eroare la accesarea URL-ului: {str(e)}")
                 except Exception as e:
                     st.error(f"Eroare: {str(e)}")
 
@@ -191,46 +254,23 @@ with tab3:
     1. **Adaugă o sursă**
        - Mergi la tab-ul "Adaugă Sursă"
        - Completează numele loteriei și URL-ul complet
-       - Alege tipul și configurează parametrii
        - Salvează sursa
     
     2. **Extrage date**
        - Mergi la tab-ul "Extrage Date"
        - Alege sursa din listă
-       - Specifică câte runde vrei să extragi
+       - Specifică câte runde vrei
        - Apasă "Extrage Date"
     
     3. **Download**
-       - Descarcă datele în format CSV, Excel sau JSON
+       - Descarcă datele în format CSV sau JSON
     
     ### 🎯 Exemple de surse:
     
-    - **Cehia Keno**: https://www.fortunacr.cz/statistiky
+    - **Sazka Rychlé kačky**: https://www.sazka.cz/loterie/rychle-kacky/vysledky
     - **Loto România**: https://www.loto.ro/rezultate-loto
-    - **Euro Jackpot**: https://www.euro-jackpot.net/ro/rezultate
     
-    ### ⚠️ Note:
-    
-    - Unele site-uri pot avea protecție anti-scraping
-    - Structura HTML diferă de la site la site
-    - Pentru rezultate optime, verifică că URL-ul afișează rezultatele direct
-    - Folosește setările avansate pentru site-uri complexe
-    
-    ### 🔧 Setări Avansate:
-    
-    Dacă aplicația nu găsește automat datele:
-    - Deschide site-ul în browser
-    - Click dreapta pe tabelul cu rezultate → "Inspect"
-    - Caută class sau id-ul containerului (ex: `.results-table`)
-    - Adaugă acest selector în setările avansate
-    """)
-    
-    st.divider()
-    
-    st.markdown("""
-    ### 📦 Instalare pentru GitHub:
-    
-    Creează fișierul `requirements.txt`:
+    ### 📦 Requirements:
     ```
     streamlit
     requests
@@ -239,17 +279,11 @@ with tab3:
     openpyxl
     lxml
     ```
-    
-    Rulează local:
-    ```bash
-    streamlit run app.py
-    ```
     """)
 
-# Footer
 st.divider()
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px;'>
-    🎰 Lottery Data Extractor v1.0 | Made with Streamlit
+    🎰 Lottery Data Extractor v2.0 | Made with Streamlit
 </div>
 """, unsafe_allow_html=True)
