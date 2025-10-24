@@ -101,7 +101,13 @@ with tab2:
                     if 'sazka.cz' in source['url'] and 'rychle-kacky' in source['url']:
                         st.info("🎯 Detectat Sazka Rychlé kačky - folosesc API Gateway...")
                         
-                        api_base = "https://apigw.sazka.cz/lottery/v2/cs/online-lotteries/rychle-kacky/draws"
+                        # Încercăm mai multe endpoint-uri posibile
+                        api_endpoints = [
+                            "https://apigw.sazka.cz/lottery/v2/cs/online-lotteries/rychle-kacky/draws",
+                            "https://apigw.sazka.cz/lottery/v1/cs/online-lotteries/rychle-kacky/draws",
+                            "https://www.sazka.cz/api/lottery/rychle-kacky/draws",
+                            "https://rk.sazka.cz/api/draws"
+                        ]
                         
                         headers = {
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -111,78 +117,86 @@ with tab2:
                             'Origin': 'https://www.sazka.cz'
                         }
                         
-                        rounds_per_request = 20
-                        num_requests = (num_rounds // rounds_per_request) + 1
+                        api_worked = False
                         
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        
-                        for page in range(num_requests):
-                            if len(results) >= num_rounds:
-                                break
-                                
-                            status_text.text(f"📥 Extrag pagina {page + 1}/{num_requests}...")
-                            
-                            params = {
-                                'limit': rounds_per_request,
-                                'offset': page * rounds_per_request
-                            }
-                            
+                        for api_base in api_endpoints:
                             try:
-                                response = requests.get(api_base, headers=headers, params=params, timeout=10)
+                                st.info(f"Încerc: {api_base}")
+                                response = requests.get(api_base, headers=headers, params={'limit': 20}, timeout=10)
                                 
                                 if response.status_code == 200:
-                                    data = response.json()
+                                    st.success(f"✅ API funcționează!")
+                                    api_worked = True
                                     
-                                    draws = data if isinstance(data, list) else data.get('draws', [])
+                                    rounds_per_request = 20
+                                    num_requests = (num_rounds // rounds_per_request) + 1
                                     
-                                    for draw in draws:
+                                    progress_bar = st.progress(0)
+                                    status_text = st.empty()
+                                    
+                                    for page in range(num_requests):
                                         if len(results) >= num_rounds:
                                             break
+                                            
+                                        status_text.text(f"📥 Extrag pagina {page + 1}/{num_requests}...")
                                         
-                                        row = []
+                                        params = {
+                                            'limit': rounds_per_request,
+                                            'offset': page * rounds_per_request
+                                        }
                                         
-                                        draw_id = draw.get('id') or draw.get('drawId')
-                                        if draw_id:
-                                            row.append(str(draw_id))
+                                        response = requests.get(api_base, headers=headers, params=params, timeout=10)
                                         
-                                        draw_time = draw.get('drawTime') or draw.get('time')
-                                        if draw_time:
-                                            try:
-                                                if 'T' in str(draw_time):
-                                                    dt = datetime.fromisoformat(str(draw_time).replace('Z', '+00:00'))
-                                                    row.append(dt.strftime('%d.%m.%Y'))
-                                                    row.append(dt.strftime('%H:%M'))
-                                                else:
-                                                    row.append(str(draw_time))
-                                            except:
-                                                row.append(str(draw_time))
+                                        if response.status_code == 200:
+                                            data = response.json()
+                                            draws = data if isinstance(data, list) else data.get('draws', data.get('data', []))
+                                            
+                                            for draw in draws:
+                                                if len(results) >= num_rounds:
+                                                    break
+                                                
+                                                row = []
+                                                
+                                                draw_id = draw.get('id') or draw.get('drawId') or draw.get('draw_id')
+                                                if draw_id:
+                                                    row.append(str(draw_id))
+                                                
+                                                draw_time = draw.get('drawTime') or draw.get('time') or draw.get('date')
+                                                if draw_time:
+                                                    try:
+                                                        if 'T' in str(draw_time):
+                                                            dt = datetime.fromisoformat(str(draw_time).replace('Z', '+00:00'))
+                                                            row.append(dt.strftime('%d.%m.%Y'))
+                                                            row.append(dt.strftime('%H:%M'))
+                                                        else:
+                                                            row.append(str(draw_time))
+                                                    except:
+                                                        row.append(str(draw_time))
+                                                
+                                                numbers = draw.get('numbers') or draw.get('winningNumbers') or []
+                                                if numbers:
+                                                    row.append(', '.join(map(str, numbers)))
+                                                
+                                                if len(row) >= 2:
+                                                    results.append(row)
                                         
-                                        numbers = draw.get('numbers', [])
-                                        if numbers:
-                                            row.append(', '.join(map(str, numbers)))
+                                        progress_bar.progress(min((page + 1) / num_requests, 1.0))
                                         
-                                        if len(row) >= 2:
-                                            results.append(row)
+                                        if page < num_requests - 1:
+                                            time.sleep(0.3)
                                     
-                                else:
-                                    st.warning(f"⚠️ API returnat status {response.status_code}")
+                                    progress_bar.empty()
+                                    status_text.empty()
                                     break
-                            
+                                    
                             except Exception as e:
-                                st.warning(f"⚠️ Eroare: {str(e)}")
-                                break
-                            
-                            progress_bar.progress(min((page + 1) / num_requests, 1.0))
-                            
-                            if page < num_requests - 1:
-                                time.sleep(0.3)
-                        
-                        progress_bar.empty()
-                        status_text.empty()
+                                st.warning(f"⚠️ {api_base}: {str(e)}")
+                                continue
                         
                         if results:
                             st.success(f"✅ Am extras {len(results)} runde din API!")
+                        elif not api_worked:
+                            st.warning("⚠️ Toate API-urile au eșuat, încerc scraping HTML...")
                     
                     # Scraping HTML generic
                     if not results:
