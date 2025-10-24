@@ -225,6 +225,7 @@ with tab2:
                     else:
     
                                         # Metodă generică pentru alte site-uri
+
                     else:
                         tables = soup.find_all('table')
                         if tables:
