@@ -99,134 +99,117 @@ with tab2:
             st.write(f"**URL:** {source['url']}")
             st.write(f"**Tip:** {source['type']}")
         
-        use_selenium = st.checkbox("🤖 Folosește browser automat (pentru site-uri dinamice)", value=False)
+        use_api = st.checkbox("🚀 Încearcă extragere avansată (API/Ajax)", value=True, 
+                             help="Folosește metode alternative pentru a încărca toate datele")
         
         if st.button("🔍 Extrage Date", type="primary"):
             with st.spinner(f"Extrag {num_rounds} runde de la {source['name']}..."):
                 try:
                     results = []
+                    soup = None
                     
-                    if use_selenium:
-                        # Folosește Selenium pentru site-uri cu butoane "Load More"
+                    # Pentru Sazka.cz - folosim API-ul lor direct
+                    if 'sazka.cz' in source['url'] and use_api:
                         try:
-                            from selenium import webdriver
-                            from selenium.webdriver.common.by import By
-                            from selenium.webdriver.support.ui import WebDriverWait
-                            from selenium.webdriver.support import expected_conditions as EC
-                            from selenium.webdriver.chrome.options import Options
-                            import time
+                            st.info("🎯 Încerc să extrag direct din API Sazka...")
                             
-                            st.info("🤖 Pornesc browser-ul automat...")
+                            # Sazka folosește un API pentru a încărca datele
+                            api_url = "https://www.sazka.cz/api/v1/lottery-draws"
                             
-                            # Configurare Chrome headless
-                            chrome_options = Options()
-                            chrome_options.add_argument('--headless')
-                            chrome_options.add_argument('--no-sandbox')
-                            chrome_options.add_argument('--disable-dev-shm-usage')
-                            chrome_options.add_argument('--disable-gpu')
-                            chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+                            headers = {
+                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                                'Accept': 'application/json',
+                                'Referer': source['url']
+                            }
                             
-                            driver = webdriver.Chrome(options=chrome_options)
-                            driver.get(source['url'])
+                            # Determină ID-ul loteriei din URL
+                            lottery_id = None
+                            if 'rychle-kacky' in source['url']:
+                                lottery_id = 'rychle-kacky'
+                            elif 'keno' in source['url']:
+                                lottery_id = 'keno'
                             
-                            # Așteaptă încărcarea paginii
-                            time.sleep(3)
-                            
-                            # Apasă butonul "Încarcă mai multe" până obținem destule rezultate
-                            click_count = 0
-                            max_clicks = (num_rounds // 20) + 2  # Estimare câte clickuri sunt necesare
-                            
-                            progress_bar = st.progress(0)
-                            status_text = st.empty()
-                            
-                            for i in range(max_clicks):
-                                try:
-                                    # Caută butonul cu diverse variante de text
-                                    button_selectors = [
-                                        "//button[contains(text(), 'NAČÍST DALŠÍ')]",
-                                        "//button[contains(text(), 'Load more')]",
-                                        "//button[contains(text(), 'Încarcă mai multe')]",
-                                        "//a[contains(text(), 'NAČÍST DALŠÍ')]",
-                                        "//button[contains(@class, 'load-more')]"
-                                    ]
+                            if lottery_id:
+                                # Încearcă să obții datele prin API
+                                params = {
+                                    'lottery': lottery_id,
+                                    'limit': min(num_rounds, 1000),
+                                    'offset': 0
+                                }
+                                
+                                response = requests.get(api_url, headers=headers, params=params, timeout=15)
+                                
+                                if response.status_code == 200:
+                                    data = response.json()
+                                    st.success(f"✅ Am găsit API-ul! Procesez datele...")
                                     
-                                    button_found = False
-                                    for selector in button_selectors:
-                                        try:
-                                            button = WebDriverWait(driver, 5).until(
-                                                EC.element_to_be_clickable((By.XPATH, selector))
-                                            )
+                                    # Procesează datele JSON
+                                    if 'draws' in data:
+                                        for draw in data['draws'][:num_rounds]:
+                                            row = []
+                                            # Extrage ID
+                                            if 'drawId' in draw:
+                                                row.append(str(draw['drawId']))
+                                            # Extrage data
+                                            if 'drawTime' in draw:
+                                                row.append(draw['drawTime'])
+                                            # Extrage numerele
+                                            if 'numbers' in draw:
+                                                numbers = ', '.join(map(str, draw['numbers']))
+                                                row.append(numbers)
                                             
-                                            # Scroll la buton
-                                            driver.execute_script("arguments[0].scrollIntoView(true);", button)
-                                            time.sleep(1)
-                                            
-                                            # Click
-                                            button.click()
-                                            click_count += 1
-                                            button_found = True
-                                            
-                                            status_text.text(f"📥 Click #{click_count} - Aștept încărcarea...")
-                                            progress_bar.progress(min((i + 1) / max_clicks, 1.0))
-                                            
-                                            # Așteaptă încărcarea datelor noi
-                                            time.sleep(2)
-                                            break
-                                        except:
-                                            continue
-                                    
-                                    if not button_found:
-                                        status_text.text("✅ Nu mai sunt date de încărcat")
-                                        break
-                                        
-                                except Exception as e:
-                                    status_text.text(f"ℹ️ Am terminat de încărcat date (Click #{click_count})")
-                                    break
-                            
-                            progress_bar.empty()
-                            status_text.empty()
-                            
-                            # Extrage datele finale
-                            soup = BeautifulSoup(driver.page_source, 'html.parser')
-                            driver.quit()
-                            
-                            st.success(f"✅ Am dat {click_count} click-uri pe buton!")
-                            
-                        except ImportError:
-                            st.error("❌ Selenium nu este instalat! Instalează: pip install selenium")
-                            st.info("📝 Încerc cu metoda standard (fără click automat)...")
-                            use_selenium = False
+                                            if row:
+                                                results.append(row)
+                                else:
+                                    st.warning(f"API status: {response.status_code}, încerc metoda standard...")
+                        
+                        except Exception as e:
+                            st.warning(f"Nu am putut folosi API-ul: {str(e)}")
+                            st.info("📝 Încerc metoda standard...")
                     
-                    if not use_selenium:
-                        # Metodă standard - doar prima pagină
+                    # Dacă nu am rezultate din API, folosește scraping HTML
+                    if not results:
                         headers = {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                            'Accept-Language': 'cs,en;q=0.9',
+                            'Referer': 'https://www.sazka.cz/'
                         }
                         
-                        response = requests.get(source['url'], headers=headers, timeout=10)
+                        response = requests.get(source['url'], headers=headers, timeout=15)
                         response.raise_for_status()
                         soup = BeautifulSoup(response.content, 'html.parser')
-                    
-                    # Extrage datele din HTML
-                    # Metodă generică - caută tabele și liste
-                    tables = soup.find_all('table')
-                    
-                    if tables:
-                        st.info(f"Am găsit {len(tables)} tabel(e) pe pagină")
+    
+                    # Extrage datele din HTML (dacă nu am rezultate din API)
+                    if not results and soup:
+                        # Metodă generică - caută tabele și liste
+                        tables = soup.find_all('table')
                         
-                        # Procesează primul tabel
-                        for row in tables[0].find_all('tr')[1:num_rounds+1]:  # Skip header
-                            cells = row.find_all(['td', 'th'])
-                            if len(cells) >= 2:
-                                row_data = [cell.get_text(strip=True) for cell in cells]
-                                results.append(row_data)
-                    
-                    # Dacă nu găsim tabele, căutăm alte structuri
-                    if not results:
-                        # Caută div-uri sau span-uri cu clase comune
-                        divs = soup.find_all('div', class_=re.compile(r'result|draw|number|winning'))
-                        if divs:
-                            st.info(f"Am găsit {len(divs)} elemente cu rezultate")
+                        if tables:
+                            st.info(f"Am găsit {len(tables)} tabel(e) pe pagină")
+                            
+                            # Procesează primul tabel
+                            for row in tables[0].find_all('tr')[1:num_rounds+1]:  # Skip header
+                                cells = row.find_all(['td', 'th'])
+                                if len(cells) >= 2:
+                                    row_data = [cell.get_text(strip=True) for cell in cells]
+                                    results.append(row_data)
+                        
+                        # Dacă nu găsim tabele, căutăm alte structuri
+                        if not results:
+                            # Caută div-uri sau span-uri cu clase comune
+                            divs = soup.find_all('div', class_=re.compile(r'result|draw|number|winning|vysledk'))
+                            if divs:
+                                st.info(f"Am găsit {len(divs)} elemente cu rezultate")
+                                
+                                # Încearcă să extragă din div-uri
+                                for div in divs[:num_rounds]:
+                                    text = div.get_text(strip=True)
+                                    if text:
+                                        # Încearcă să găsească pattern-uri de numere
+                                        numbers = re.findall(r'\d+', text)
+                                        if len(numbers) >= 5:  # Are sens ca rezultat de loterie
+                                            results.append([text])
                     
                     if results:
                         # Crează DataFrame
@@ -302,12 +285,13 @@ with tab3:
     - **Loto România**: https://www.loto.ro/rezultate-loto
     - **Euro Jackpot**: https://www.euro-jackpot.net/ro/rezultate
     
-    ### ⚠️ Note:
+    ### ⚠️ Note importante:
     
     - Unele site-uri pot avea protecție anti-scraping
-    - Structura HTML diferă de la site la site
-    - Pentru rezultate optime, verifică că URL-ul afișează rezultatele direct
-    - Folosește setările avansate pentru site-uri complexe
+    - Extragerea avansată încearcă să folosească API-uri pentru date complete
+    - Pentru Sazka.cz, aplicația detectează automat API-ul lor
+    - Dacă site-ul încarcă date dinamic (cu JavaScript), bifează opțiunea avansată
+    - Prima încărcare poate fi mai lentă dar va extrage toate rundele disponibile
     
     ### 🔧 Setări Avansate:
     
@@ -331,14 +315,6 @@ with tab3:
     pandas
     openpyxl
     lxml
-    selenium
-    webdriver-manager
-    ```
-    
-    **Pentru Selenium (click automat pe butoane):**
-    ```bash
-    # Instalează Chrome Driver automat
-    pip install webdriver-manager
     ```
     
     Rulează local:
