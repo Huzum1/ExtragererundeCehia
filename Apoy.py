@@ -101,11 +101,12 @@ with tab2:
                     if 'sazka.cz' in source['url'] and 'rychle-kacky' in source['url']:
                         st.info("🎯 Detectat Sazka Rychlé kačky - folosesc API Gateway...")
                         
-                        # Încercăm mai multe endpoint-uri posibile
+                        # Încercăm cele mai stabile endpoint-uri
                         api_endpoints = [
                             "https://apigw.sazka.cz/lottery/v2/cs/online-lotteries/rychle-kacky/draws",
                             "https://apigw.sazka.cz/lottery/v1/cs/online-lotteries/rychle-kacky/draws",
-                            "https://www.sazka.cz/api/lottery/rychle-kacky/draws",
+                            # Endpoint-uri de fallback, deși necesită X-Origin-Host
+                            "https://www.sazka.cz/api/lottery/rychle-kacky/draws", 
                             "https://rk.sazka.cz/api/draws"
                         ]
                         
@@ -113,6 +114,10 @@ with tab2:
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                             'Accept': 'application/json',
                             'Ocp-Apim-Subscription-Key': '6fdc6e24bfcb438bac06efb0f1488534',
+                            
+                            # 🌟 HEADER ESENȚIAL PENTRU A EVITA BLOCAREA API GATEWAY 🌟
+                            'X-Origin-Host': 'www.sazka.cz', 
+                            
                             'Referer': source['url'],
                             'Origin': 'https://www.sazka.cz'
                         }
@@ -122,13 +127,15 @@ with tab2:
                         for api_base in api_endpoints:
                             try:
                                 st.info(f"Încerc: {api_base}")
-                                response = requests.get(api_base, headers=headers, params={'limit': 20}, timeout=10)
+                                # Test rapid de conectivitate (limit: 1)
+                                response = requests.get(api_base, headers=headers, params={'limit': 1}, timeout=10)
                                 
                                 if response.status_code == 200:
-                                    st.success(f"✅ API funcționează!")
+                                    st.success(f"✅ API funcționează! Status Code: {response.status_code}")
                                     api_worked = True
                                     
-                                    rounds_per_request = 20
+                                    # Setări pentru extragerea completă
+                                    rounds_per_request = 50  # Mărim limita de runde per cerere pentru viteză
                                     num_requests = (num_rounds // rounds_per_request) + 1
                                     
                                     progress_bar = st.progress(0)
@@ -149,6 +156,8 @@ with tab2:
                                         
                                         if response.status_code == 200:
                                             data = response.json()
+                                            
+                                            # Ajustăm logica de extragere pentru structuri comune API
                                             draws = data if isinstance(data, list) else data.get('draws', data.get('data', []))
                                             
                                             for draw in draws:
@@ -157,40 +166,46 @@ with tab2:
                                                 
                                                 row = []
                                                 
+                                                # Extrage ID-ul rundei
                                                 draw_id = draw.get('id') or draw.get('drawId') or draw.get('draw_id')
                                                 if draw_id:
                                                     row.append(str(draw_id))
                                                 
+                                                # Extrage și formatează data/ora
                                                 draw_time = draw.get('drawTime') or draw.get('time') or draw.get('date')
                                                 if draw_time:
                                                     try:
-                                                        if 'T' in str(draw_time):
+                                                        if 'T' in str(draw_time): # Format ISO 8601
                                                             dt = datetime.fromisoformat(str(draw_time).replace('Z', '+00:00'))
                                                             row.append(dt.strftime('%d.%m.%Y'))
-                                                            row.append(dt.strftime('%H:%M'))
+                                                            row.append(dt.strftime('%H:%M:%S')) # Inclusiv secunde pentru rapiditate
                                                         else:
                                                             row.append(str(draw_time))
                                                     except:
                                                         row.append(str(draw_time))
                                                 
+                                                # Extrage numerele câștigătoare
                                                 numbers = draw.get('numbers') or draw.get('winningNumbers') or []
                                                 if numbers:
-                                                    row.append(', '.join(map(str, numbers)))
+                                                    row.append(', '.join(map(str, sorted(numbers)))) # Sortăm numerele
                                                 
-                                                if len(row) >= 2:
+                                                if len(row) >= 2: # Asigură-te că rândul are minim ID și timp
                                                     results.append(row)
+                                        else:
+                                            st.warning(f"⚠️ Eroare pagină API: Status {response.status_code}")
+                                            break
                                         
                                         progress_bar.progress(min((page + 1) / num_requests, 1.0))
                                         
                                         if page < num_requests - 1:
-                                            time.sleep(0.3)
+                                            time.sleep(0.1) # Pauză scurtă pentru a nu supraîncărca serverul
                                     
                                     progress_bar.empty()
                                     status_text.empty()
-                                    break
+                                    break # Ieșim din loop-ul API-urilor dacă unul a funcționat
                                     
                             except Exception as e:
-                                st.warning(f"⚠️ {api_base}: {str(e)}")
+                                st.warning(f"⚠️ {api_base}: Eroare la cerere ({str(e)})")
                                 continue
                         
                         if results:
@@ -216,7 +231,8 @@ with tab2:
                             st.info(f"✓ Am găsit {len(tables)} tabel(e)")
                             for table in tables:
                                 rows = table.find_all('tr')
-                                for row in rows[1:num_rounds+1]:
+                                # Începem de la rândul 1 (după antet) și limităm la num_rounds
+                                for row in rows[1:num_rounds+1]: 
                                     cells = row.find_all(['td', 'th'])
                                     if len(cells) >= 2:
                                         row_data = [cell.get_text(strip=True) for cell in cells]
@@ -227,7 +243,18 @@ with tab2:
                     
                     # Afișează rezultatele
                     if results:
-                        df = pd.DataFrame(results)
+                        # Asigurăm că toate rândurile au același număr de coloane (simplificare)
+                        max_cols = max(len(r) for r in results) if results else 0
+                        results_padded = [r + [''] * (max_cols - len(r)) for r in results]
+                        
+                        # Încercăm să punem anteturi mai clare dacă e API
+                        if 'sazka.cz' in source['url'] and api_worked:
+                            columns = ['ID Runda', 'Data', 'Ora', 'Numere Extrase'] + [f'Col_{i}' for i in range(max_cols - 4)]
+                            df = pd.DataFrame(results_padded, columns=columns[:max_cols])
+                        else:
+                            df = pd.DataFrame(results_padded)
+
+
                         st.session_state.extracted_data = df
                         
                         st.success(f"✅ Am extras {len(results)} runde!")
@@ -236,7 +263,7 @@ with tab2:
                         col1, col2 = st.columns(2)
                         
                         with col1:
-                            csv = df.to_csv(index=False)
+                            csv = df.to_csv(index=False).encode('utf-8')
                             st.download_button(
                                 "📥 Download CSV",
                                 csv,
@@ -281,7 +308,7 @@ with tab3:
     
     ### 🎯 Exemple de surse:
     
-    - **Sazka Rychlé kačky**: https://www.sazka.cz/loterie/rychle-kacky/vysledky
+    - **Sazka Rychlé kačky (RECOMANDAT)**: https://www.sazka.cz/loterie/rychle-kacky/vysledky
     - **Loto România**: https://www.loto.ro/rezultate-loto
     
     ### 📦 Requirements:
@@ -290,8 +317,6 @@ with tab3:
     requests
     beautifulsoup4
     pandas
-    openpyxl
-    lxml
     ```
     """)
 
