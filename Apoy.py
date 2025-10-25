@@ -11,42 +11,10 @@ st.set_page_config(
 )
 
 # CSS customizat
-st.markdown("""
-<style>
-    .main-header {
-        text-align: center;
-        padding: 2rem;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-    }
-    .stat-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        text-align: center;
-    }
-    .stat-value {
-        font-size: 3rem;
-        font-weight: bold;
-        margin: 0;
-    }
-    .stat-label {
-        font-size: 1.2rem;
-        margin-top: 0.5rem;
-    }
-</style>
-""", unsafe_allow_html=True)
+st.markdown('<style>.main-header {text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 10px; margin-bottom: 2rem;} .stat-card {background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem; border-radius: 10px; text-align: center;} .stat-value {font-size: 3rem; font-weight: bold; margin: 0;} .stat-label {font-size: 1.2rem; margin-top: 0.5rem;}</style>', unsafe_allow_html=True)
 
 # Header
-st.markdown("""
-<div class="main-header">
-    <h1>🎰 Loteria Cehia 12/66</h1>
-    <h3>Manager Runde - Identificare Duplicate</h3>
-</div>
-""", unsafe_allow_html=True)
+st.markdown('<div class="main-header"><h1>🎰 Loteria Cehia 12/66</h1><h3>Manager Runde - Identificare Duplicate</h3></div>', unsafe_allow_html=True)
 
 # Inițializare session state
 if 'runde_df' not in st.session_state:
@@ -57,17 +25,15 @@ if 'all_numbers' not in st.session_state:
 # Sidebar
 with st.sidebar:
     st.header("ℹ️ Informații")
-    st.markdown("""
-    ### Format așteptat:
-    - **12 numere** per rundă
-    - Interval: **1-66**
-    - Separate prin: virgulă, spațiu sau tab
-    
-    ### Tipuri fișiere:
-    - CSV (.csv)
-    - Excel (.xlsx, .xls)
-    - Text (.txt)
-    """)
+    st.write("**Format așteptat:**")
+    st.write("- 12 numere per rundă")
+    st.write("- Interval: 1-66")
+    st.write("- Separate prin: virgulă, spațiu sau tab")
+    st.write("")
+    st.write("**Tipuri fișiere:**")
+    st.write("- CSV (.csv)")
+    st.write("- Excel (.xlsx, .xls)")
+    st.write("- Text (.txt)")
     
     st.markdown("---")
     
@@ -213,28 +179,13 @@ with tab1:
                         duplicate_count = len(df) - unique_count
                         
                         with col1:
-                            st.markdown(f"""
-                            <div class="stat-card">
-                                <div class="stat-value">{len(df)}</div>
-                                <div class="stat-label">Total Runde</div>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            st.markdown(f'<div class="stat-card"><div class="stat-value">{len(df)}</div><div class="stat-label">Total Runde</div></div>', unsafe_allow_html=True)
                         
                         with col2:
-                            st.markdown(f"""
-                            <div class="stat-card">
-                                <div class="stat-value">{unique_count}</div>
-                                <div class="stat-label">Runde Unice</div>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            st.markdown(f'<div class="stat-card"><div class="stat-value">{unique_count}</div><div class="stat-label">Runde Unice</div></div>', unsafe_allow_html=True)
                         
                         with col3:
-                            st.markdown(f"""
-                            <div class="stat-card">
-                                <div class="stat-value">{duplicate_count}</div>
-                                <div class="stat-label">Runde Duplicate</div>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            st.markdown(f'<div class="stat-card"><div class="stat-value">{duplicate_count}</div><div class="stat-label">Runde Duplicate</div></div>', unsafe_allow_html=True)
                         
                         if erori:
                             with st.expander(f"⚠️ {len(erori)} erori de procesare (click pentru detalii)"):
@@ -394,14 +345,7 @@ with tab3:
                     else:
                         color = "#dc3545"  # Roșu
                     
-                    st.markdown(f"""
-                    <div style='background-color: {color}; color: white; 
-                                padding: 10px; border-radius: 5px; text-align: center;
-                                margin: 2px;'>
-                        <strong>{num}</strong><br>
-                        <small>{freq}</small>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(f'<div style="background-color: {color}; color: white; padding: 10px; border-radius: 5px; text-align: center; margin: 2px;"><strong>{num}</strong><br><small>{freq}</small></div>', unsafe_allow_html=True)
         
         # Legendă
         st.markdown("---")
@@ -519,8 +463,5 @@ with tab4:
                 use_container_width=True
             )
 
-# Footer
 st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: gray; padding: 20px;'>
-    <p><strong>Loteria Cehia 12/66 - Manager Rund
+st.markdown('<div style="text-align: center; color: gray; padding: 20px;"><p><strong>Loteria Cehia 12/66 - Manager Runde</strong></p><p>Creat cu ❤️ folosind Streamlit</p></div>', unsafe_allow_html=True)
