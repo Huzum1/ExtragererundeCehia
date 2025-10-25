@@ -368,20 +368,13 @@ with tab4:
     else:
         df = st.session_state.runde_df
         
-        col1, col2 = st.columns([2, 1])
+        col1, col2 = st.columns(2)
         
         with col1:
             export_option = st.radio(
                 "Ce dorești să exporți?",
                 ["Doar runde unice", "Toate rundele", "Doar runde duplicate"],
                 help="Alege ce tip de runde vrei în fișierul exportat"
-            )
-        
-        with col2:
-            include_stats = st.checkbox(
-                "Include statistici",
-                value=True,
-                help="Adaugă coloane cu informații despre unicitate și apariții"
             )
         
         # Pregătire export
@@ -410,15 +403,9 @@ with tab4:
         with col1:
             st.subheader("📄 Export CSV")
             
-            if include_stats:
-                csv_data = df_export[['runda_nr', 'numere_str', 'runda_unica', 'nr_aparitii']].copy()
-                csv_data.columns = ['Nr_Runda', 'Numere', 'Unica', 'Nr_Aparitii']
-            else:
-                csv_data = df_export[['runda_nr', 'numere_str']].copy()
-                csv_data.columns = ['Nr_Runda', 'Numere']
-            
             csv_buffer = io.StringIO()
-            csv_data.to_csv(csv_buffer, index=False)
+            for _, row in df_export.iterrows():
+                csv_buffer.write(row['numere_str'] + '\n')
             
             st.download_button(
                 label="📥 Descarcă CSV",
@@ -433,27 +420,11 @@ with tab4:
             
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                if include_stats:
-                    export_excel = df_export[['runda_nr', 'numere_str', 'runda_unica', 'nr_aparitii']].copy()
-                    export_excel.columns = ['Nr_Runda', 'Numere', 'Unica', 'Nr_Aparitii']
-                else:
-                    export_excel = df_export[['runda_nr', 'numere_str']].copy()
-                    export_excel.columns = ['Nr_Runda', 'Numere']
-                
-                export_excel.to_excel(writer, index=False, sheet_name='Runde')
-                
-                # Sheet cu statistici
-                if include_stats:
-                    stats_data = {
-                        'Metric': ['Total Runde', 'Runde Unice', 'Runde Duplicate'],
-                        'Valoare': [
-                            len(df),
-                            df['runda_unica'].sum(),
-                            len(df) - df['runda_unica'].sum()
-                        ]
-                    }
-                    stats_df = pd.DataFrame(stats_data)
-                    stats_df.to_excel(writer, index=False, sheet_name='Statistici')
+                export_excel = pd.DataFrame({
+                    'col' + str(i): [row[i-1] for row in df_export['numere']]
+                    for i in range(1, 13)
+                })
+                export_excel.to_excel(writer, index=False, header=False, sheet_name='Runde')
             
             st.download_button(
                 label="📥 Descarcă Excel",
